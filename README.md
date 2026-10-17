@@ -23,7 +23,7 @@ Tested on WO 2020/243027 (CYP46A1): the selection matched the chemist's list exa
 
 ## Install
 
-- **Claude Code:** `/plugin marketplace add <github-user>/patent-drawer`, then `/plugin install patent-drawer`.
+- **Claude Code:** `/plugin marketplace add chrisrenzm/patent-drawer`, then `/plugin install patent-drawer`.
 - **claude.ai:** zip `skills/patent-drawer/` and upload it as a skill.
 - **Manual:** copy `skills/patent-drawer/` into `~/.claude/skills/`.
 
