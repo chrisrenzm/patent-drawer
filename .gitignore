@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+tests/local/
+patent-drawer-runs/
+*.pdf
+!tests/public/*.pdf
+.env
+.claude/
+.pytest_cache/
+.DS_Store

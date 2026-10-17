@@ -1,0 +1,14 @@
+{
+ "label_pattern": "{TARGET}_WO{last4}_{patent_no}",
+ "caption_lines": [
+  "{label}",
+  "Molecular weight: {mw:.2f}",
+  "CLogP: {clogp}",
+  "{TARGET} IC<sub>50</sub> {activity_display}"
+ ],
+ "extra_lines": [],
+ "title_lines": ["{TARGET}_WO{last4}_<author>", "Original patent: <patent number>", "<what was drawn>"],
+ "deck_name": "{TARGET}_WO{last4}",
+ "template": null,
+ "style": "ACS Document 1996"
+}

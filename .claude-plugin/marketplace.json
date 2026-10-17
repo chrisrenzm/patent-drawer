@@ -1,0 +1,5 @@
+{
+  "name": "patent-drawer",
+  "owner": {"name": "Chris Ren"},
+  "plugins": [{"name": "patent-drawer", "source": "./", "description": "Patent structures to ChemDraw cards, deck and Excel."}]
+}
