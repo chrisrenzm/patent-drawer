@@ -9,6 +9,18 @@ A Claude skill that turns the compounds in a chemistry patent into:
 
 The point is to move the chemist's job from *drawing* structures to *reviewing* them.
 
+> **Designed for the Steven Liang lab.** The card layout, labels and deck style are set up for this lab's workflow. Other groups may need to adjust the card preset and deck template.
+
+## Example output (CYP46A1, WO 2020/243027)
+
+A slide from the PowerPoint deck. Each card opens in ChemDraw with a double-click.
+
+![Example deck slide: CYP46A1 compounds with CLogP and IC50](docs/example_deck_slide.png)
+
+A page from the review sheet: the patent's own drawing (left) next to ours (right), with any flags in red.
+
+![Example review sheet: patent drawing next to the generated card](docs/example_review_sheet.png)
+
 ## How it gets structures right
 
 1. The compound's name is read from the patent's Example titles. Common scanning typos are fixed.
@@ -23,6 +35,7 @@ Tested on WO 2020/243027 (CYP46A1): the selection matched the chemist's list exa
 
 ## Install
 
+- **Ask your AI:** paste this into Claude Code: *"Install the patent-drawer plugin from github.com/chrisrenzm/patent-drawer and run its setup script."*
 - **Claude Code:** `/plugin marketplace add chrisrenzm/patent-drawer`, then `/plugin install patent-drawer`.
 - **claude.ai:** zip `skills/patent-drawer/` and upload it as a skill.
 - **Manual:** copy `skills/patent-drawer/` into `~/.claude/skills/`.
