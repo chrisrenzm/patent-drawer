@@ -46,7 +46,7 @@ CLogP comes from the user's own ChemDraw (Phase 4), so it matches what they woul
 4. **Fix loop** (whenever anything is flagged): `PD fixbatch RUN`, run one **fixer subagent** per batch (prompt `reference/fix_prompt.md`), then `PD fixapply RUN`. It decides whether each flag is a false alarm, a real error (fixed, with where it went wrong), or something the patent itself leaves open. Every case is logged in `RUN/mistakes.md`. Repeat once if anything new is flagged; whatever is still flagged after 2 rounds goes to the user.
 
 ## Phase 4: CLogP from ChemDraw
-`PD clogp RUN` (Mac with ChemDraw Professional; run it outside the sandbox). For each structure it writes a file with a live ChemDraw CLogP link, ChemDraw opens, cleans and saves it (no clicks, no screen control), and the value ChemDraw wrote goes into `tracker.csv` (2 decimals). Under 1 s per compound.
+`PD clogp RUN` (ChemDraw Professional or Signals ChemDraw, Mac or Windows; run it outside the sandbox). For each structure it writes a file with a live ChemDraw CLogP link, ChemDraw opens, cleans and saves it (no clicks, no screen control), and the value ChemDraw wrote goes into `tracker.csv` (2 decimals). Under 1 s per compound.
 If it fails, leave CLogP blank, say why in `decisions.md`, and continue. Re-run with `--only` for any compound fixed later.
 
 ## Phase 4b: Pilot

@@ -308,6 +308,34 @@ on run argv
 end run
 """
 
+# The same steps on Windows, through ChemDraw's COM automation (untested: no Windows test machine yet).
+CLOGP_SCRIPT_WIN = r"""
+$cd = New-Object -ComObject ChemDraw.Application
+foreach ($p in $args) {
+  $d = $cd.Documents.Open($p)
+  try { $d.Objects.Clean() } catch { }
+  $d.SaveAs($p)
+  $d.Close()
+}
+"""
+
+def _run_chemdraw(files):
+    """Have ChemDraw open, clean and save each file. Returns an error message, or '' if it ran."""
+    if sys.platform == "darwin":
+        cmd, script = ["osascript", "-"] + files, CLOGP_SCRIPT
+    elif sys.platform == "win32":
+        import tempfile
+        ps1 = os.path.join(tempfile.mkdtemp(), "clogp.ps1")
+        open(ps1, "w").write(CLOGP_SCRIPT_WIN)
+        cmd, script = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1] + files, None
+    else:
+        return "ChemDraw is not available on this system"
+    try:
+        r = subprocess.run(cmd, input=script, capture_output=True, text=True)
+    except FileNotFoundError as e:
+        return str(e)
+    return r.stderr.strip()[-300:] if r.returncode else ""
+
 def _add_clogp_link(path):
     s = open(path).read()
     frag = re.search(r"<fragment.*?</fragment>", s, re.S).group(0)
@@ -322,24 +350,19 @@ def chemdraw_check(a):
     """Start-of-run check: is ChemDraw installed, and can it calculate CLogP (Professional or Signals ChemDraw)?"""
     sys.path.insert(0, HERE)
     from draw_card import draw_card
-    if sys.platform != "darwin":
-        print("CHEMDRAW: not checked (CLogP from ChemDraw is only set up for macOS)"); return
-    if not os.path.exists("/Applications/ChemDraw.app"):
+    if sys.platform == "darwin" and not os.path.exists("/Applications/ChemDraw.app"):
         print("CHEMDRAW: not installed"); return
     import tempfile
     f = os.path.join(tempfile.mkdtemp(), "check.cdxml")
     draw_card("CN1C=NC2=C1C(=O)N(C(=O)N2C)C", [], f)  # caffeine; ChemDraw gives CLogP -0.04
     _add_clogp_link(f)
-    subprocess.run(["osascript", "-", f], input=CLOGP_SCRIPT, capture_output=True, text=True)
+    err = _run_chemdraw([f])
     m = re.search(r"CLogP:\s*(-?[\d.]+)", open(f).read())
     print(f"CHEMDRAW: ok, CLogP works (caffeine {m.group(1)})" if m else
-          "CHEMDRAW: installed, but no CLogP came back (needs ChemDraw Professional or Signals ChemDraw)")
+          f"CHEMDRAW: no CLogP came back (is ChemDraw Professional or Signals ChemDraw installed?) {err}")
 
 def clogp(a):
-    """ChemDraw's own CLogP for each structure, with no clicks: needs ChemDraw on a Mac (run outside the sandbox)."""
-    if sys.platform != "darwin":
-        print("CLogP from ChemDraw is only set up for macOS so far; leaving CLogP blank.")
-        return
+    """ChemDraw's own CLogP for each structure, with no clicks (run outside the sandbox)."""
     sys.path.insert(0, HERE)
     from draw_card import draw_card
     rows = read_tracker(a.run)
@@ -354,9 +377,9 @@ def clogp(a):
         files[no] = os.path.join(d, no + ".cdxml")
         draw_card(rec["smiles"], [], files[no])
         _add_clogp_link(files[no])
-    r = subprocess.run(["osascript", "-"] + list(files.values()), input=CLOGP_SCRIPT, capture_output=True, text=True)
-    if r.returncode:
-        print("ChemDraw step failed:", r.stderr.strip()[-300:])
+    err = _run_chemdraw(list(files.values()))
+    if err:
+        print("ChemDraw step failed:", err)
     got = {}
     for no, f in files.items():
         m = re.search(r"CLogP:\s*(-?[\d.]+)", open(f).read())
