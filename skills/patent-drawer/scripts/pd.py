@@ -16,7 +16,7 @@
   pd.py outputs  RUN                     deck + Excel + contact sheet
   pd.py status   RUN                     counts per status
 """
-import argparse, csv, glob, json, os, re, shutil, subprocess, sys
+import argparse, csv, glob, json, os, re, shutil, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -321,8 +321,25 @@ foreach ($p in $args) {
 
 def _run_chemdraw(files):
     """Have ChemDraw open, clean and save each file. Returns an error message, or '' if it ran."""
+    files = [os.path.abspath(f) for f in files]  # ChemDraw cannot open relative paths
     if sys.platform == "darwin":
-        cmd, script = ["osascript", "-"] + files, CLOGP_SCRIPT
+        # Start ChemDraw hidden and in the background so it never takes over the screen,
+        # and quit it afterwards if it was not already open.
+        osa = lambda s: subprocess.run(["osascript", "-e", s], capture_output=True, text=True).stdout.strip()
+        started = osa('application "ChemDraw" is running') != "true"
+        if started:
+            subprocess.run(["open", "-g", "-j", "-a", "ChemDraw"])
+            for _ in range(60):
+                if osa('application "ChemDraw" is running') == "true":
+                    break
+                time.sleep(0.5)
+            time.sleep(2)
+        try:
+            r = subprocess.run(["osascript", "-"] + files, input=CLOGP_SCRIPT, capture_output=True, text=True)
+        finally:
+            if started:
+                osa('tell application "ChemDraw" to quit saving no')
+        return r.stderr.strip()[-300:] if r.returncode else ""
     elif sys.platform == "win32":
         import tempfile
         ps1 = os.path.join(tempfile.mkdtemp(), "clogp.ps1")

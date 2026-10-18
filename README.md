@@ -31,7 +31,7 @@ First run: `bash skills/patent-drawer/scripts/setup_env.sh` (Python 3.10+). It n
 
 ## Use
 
-Ask Claude, for example: *"Draw the A-rated compounds from WO2020243027, PDF attached."* The run is hands-off: the skill asks no questions, writes every choice it makes to `decisions.md`, investigates and fixes flagged compounds (logged in `mistakes.md`), and puts everything in one folder in your Downloads.
+Ask Claude, for example: *"Draw the A-rated compounds from WO2020243027, PDF attached."* The skill asks you once to confirm the compound list and card labels, then runs hands-off: it writes every choice it makes to `decisions.md`, investigates and fixes flagged compounds (logged in `mistakes.md`), and puts everything in one folder in your Downloads.
 
 ## Limitations
 
