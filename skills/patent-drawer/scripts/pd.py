@@ -155,6 +155,14 @@ def resolve(a):
     idx_file = os.path.join(a.run, "crops", "index.json")
     idx = json.load(open(idx_file)) if os.path.exists(idx_file) else {}
     todo = []
+    # A new or poorly indexed patent has almost nothing in PubChem; then the flag is noise.
+    use_db = len(P.db_keys(db)) >= 0.25 * len(selected(rows))
+    if not use_db:
+        note = (f"PubChem: only {len(P.db_keys(db))} compounds linked to this patent, "
+                "so the 'not in database list' check was skipped for every compound.")
+        print(note)
+        with open(os.path.join(a.run, "decisions.md"), "a") as f:
+            f.write("- " + note + "\n")
     for r in selected(rows):
         no = r["patent_no"]
         e = P.example_name(pdf, c["prefix"], no)
@@ -167,7 +175,7 @@ def resolve(a):
             rec.update(info, structure_source=f"name (Example {e['example']}, p.{e['page']}) -> OPSIN")
             rec["in_db"] = info["inchikey"] in P.db_keys(db)
             rec["ms_match"] = any(abs(v - info["mh"]) < 0.6 for v in rec["ms_found"]) if rec["ms_found"] else None
-            if not rec["in_db"]:
+            if use_db and not rec["in_db"]:
                 rec["flags"].append("not in database list")
             if rec["ms_match"] is False:
                 rec["flags"].append("MS does not match")
@@ -228,6 +236,138 @@ def apply(a):
     sync(a.run)
     print(f"applied {n} checker verdicts")
     status(a)
+
+def fixbatch(a):
+    """Every flagged compound -> batches/fix_K.json for the fixer group."""
+    bdir = os.path.join(a.run, "batches")
+    for f in glob.glob(os.path.join(bdir, "fix_*.json")):
+        os.remove(f)
+    todo = []
+    for r in selected(read_tracker(a.run)):
+        rec = load_rec(a.run, r["patent_no"])
+        if rec and (rec["status"] == "flagged" or (rec.get("ms_match") is False and not rec.get("ms_explained"))):
+            todo.append(dict(no=rec["patent_no"], name=rec.get("name"), smiles=rec.get("smiles"), flags=rec["flags"],
+                             review_png=_review_image(a.run, rec["patent_no"], rec.get("smiles")),
+                             drawing_png=os.path.join(a.run, "crops", rec["patent_no"] + ".png")))
+    for i in range(0, len(todo), a.batch):
+        json.dump(todo[i:i + a.batch], open(os.path.join(bdir, f"fix_{i // a.batch + 1}.json"), "w"), indent=1)
+    print(f"{len(todo)} flagged compounds to fix in {-(-len(todo) // a.batch)} batch(es):", " ".join(x["no"] for x in todo))
+
+def fixapply(a):
+    """Fixer verdicts: false_alarm -> trusted; fixed -> new name through OPSIN, status 'fixed' until the
+    cross-check confirms it; cannot_fix -> stays flagged for the user. Every case goes into mistakes.md."""
+    log = os.path.join(a.run, "mistakes.md")
+    if not os.path.exists(log):
+        open(log, "w").write("# Mistake log\n\n| Compound | Flag | Verdict | Where it went wrong | What was done |\n|---|---|---|---|---|\n")
+    for f in sorted(glob.glob(os.path.join(a.run, "batches", "fix_*.result.json"))):
+        for v in json.load(open(f)):
+            rec = load_rec(a.run, v["no"])
+            if not rec:
+                print("unknown compound in", f, v.get("no")); continue
+            verdict, done = v.get("verdict"), v.get("reason", "")
+            if verdict == "false_alarm":
+                rec["status"] = "trusted"
+                if rec.get("ms_match") is False:
+                    rec["ms_explained"] = done
+            elif verdict == "fixed" and v.get("corrected_name"):
+                s = P.opsin(v["corrected_name"])
+                info = P.mol_info(s) if s else None
+                if info:
+                    rec.update(info, name=v["corrected_name"],
+                               structure_source=f"fixed from drawing -> OPSIN ({done})")
+                    rec["ms_match"] = any(abs(x - info["mh"]) < 0.6 for x in rec["ms_found"]) if rec["ms_found"] else None
+                    rec["status"] = "fixed" if rec["ms_match"] is not False else "flagged"
+                    done = f"new name: {v['corrected_name']}" + ("" if rec["ms_match"] is not False else " (mass still off)")
+                else:
+                    rec["status"], done = "flagged", "corrected name did not convert: " + v["corrected_name"]
+            else:
+                rec["status"] = "flagged"
+            if rec["status"] != "flagged":
+                rec.setdefault("resolved_flags", []).extend(rec["flags"]); rec["flags"] = []
+            row = [rec["patent_no"], "; ".join(rec.get("resolved_flags", []) + rec["flags"])[-200:], verdict,
+                   v.get("where", ""), done]
+            open(log, "a").write("| " + " | ".join(str(x).replace("|", "/") for x in row) + " |\n")
+            save_rec(a.run, rec)
+    sync(a.run)
+    status(a)
+
+# ChemDraw stores a pasted CLogP as a live <chemicalproperty> (type 18) linked to the molecule's atoms and
+# bonds, and recalculates it when the structure changes. So we write that link into each file ourselves,
+# ChemDraw opens it, "Clean Up" nudges the structure, and the saved file holds ChemDraw's own value.
+CLOGP_SCRIPT = """
+on run argv
+  repeat with p in argv
+    set f to POSIX file (p as text)
+    tell application "ChemDraw"
+      open f
+      clean front document
+      save front document
+      close front document saving no
+    end tell
+  end repeat
+end run
+"""
+
+def _add_clogp_link(path):
+    s = open(path).read()
+    frag = re.search(r"<fragment.*?</fragment>", s, re.S).group(0)
+    basis = re.findall(r'<[nb]\s+id="(\d+)"', frag)
+    nid = max(int(x) for x in re.findall(r'\bid="(\d+)"', s)) + 1
+    add = (f'<t id="{nid}" p="0 0" InterpretChemically="no"><s font="3" size="10" color="0">CLogP: PENDING</s></t>'
+           f'<chemicalproperty id="{nid + 1}" ChemicalPropertyDisplayID="{nid}" ChemicalPropertyIsActive="yes" '
+           f'ChemicalPropertyType="18" BasisObjects="{" ".join(basis)}"/>')
+    open(path, "w").write(s.replace("</page>", add + "</page>", 1))
+
+def chemdraw_check(a):
+    """Start-of-run check: is ChemDraw installed, and can it calculate CLogP (Professional or Signals ChemDraw)?"""
+    sys.path.insert(0, HERE)
+    from draw_card import draw_card
+    if sys.platform != "darwin":
+        print("CHEMDRAW: not checked (CLogP from ChemDraw is only set up for macOS)"); return
+    if not os.path.exists("/Applications/ChemDraw.app"):
+        print("CHEMDRAW: not installed"); return
+    import tempfile
+    f = os.path.join(tempfile.mkdtemp(), "check.cdxml")
+    draw_card("CN1C=NC2=C1C(=O)N(C(=O)N2C)C", [], f)  # caffeine; ChemDraw gives CLogP -0.04
+    _add_clogp_link(f)
+    subprocess.run(["osascript", "-", f], input=CLOGP_SCRIPT, capture_output=True, text=True)
+    m = re.search(r"CLogP:\s*(-?[\d.]+)", open(f).read())
+    print(f"CHEMDRAW: ok, CLogP works (caffeine {m.group(1)})" if m else
+          "CHEMDRAW: installed, but no CLogP came back (needs ChemDraw Professional or Signals ChemDraw)")
+
+def clogp(a):
+    """ChemDraw's own CLogP for each structure, with no clicks: needs ChemDraw on a Mac (run outside the sandbox)."""
+    if sys.platform != "darwin":
+        print("CLogP from ChemDraw is only set up for macOS so far; leaving CLogP blank.")
+        return
+    sys.path.insert(0, HERE)
+    from draw_card import draw_card
+    rows = read_tracker(a.run)
+    d = os.path.join(a.run, "clogp")
+    os.makedirs(d, exist_ok=True)
+    nos = a.only.split(",") if a.only else [r["patent_no"] for r in selected(rows)]
+    files = {}
+    for no in nos:
+        rec = load_rec(a.run, no)
+        if not rec or not rec.get("smiles"):
+            print(no, "skipped: no structure"); continue
+        files[no] = os.path.join(d, no + ".cdxml")
+        draw_card(rec["smiles"], [], files[no])
+        _add_clogp_link(files[no])
+    r = subprocess.run(["osascript", "-"] + list(files.values()), input=CLOGP_SCRIPT, capture_output=True, text=True)
+    if r.returncode:
+        print("ChemDraw step failed:", r.stderr.strip()[-300:])
+    got = {}
+    for no, f in files.items():
+        m = re.search(r"CLogP:\s*(-?[\d.]+)", open(f).read())
+        if m:
+            got[no] = f"{float(m.group(1)):.2f}"
+        else:
+            print(no, "no CLogP from ChemDraw")
+    for row in rows:
+        row["clogp"] = got.get(row["patent_no"], row.get("clogp", ""))
+    write_tracker(a.run, rows)
+    print(f"CLogP from ChemDraw for {len(got)} of {len(nos)} compounds")
 
 def caption_lines(spec, row, rec):
     vals = {**row, **rec, "label": rec["label"], "clogp": row.get("clogp", "")}
@@ -325,6 +465,8 @@ def dcapply(a):
             if v.get("verdict") != "ok":
                 rec["status"] = "flagged"
                 rec["flags"].append(f"{group}: {v.get('reason', 'no reason given')}")
+            elif rec["status"] == "fixed" and group == "cross-check":
+                rec["status"] = "trusted"  # an independent check confirmed the fix
             save_rec(a.run, rec)
     sync(a.run)
     for (g, v), x in sorted(cnt.items()):
@@ -375,7 +517,7 @@ def validate(a):
             if rec["inchikey"] in seen:
                 probs.append("duplicate structure of another compound")
             seen.add(rec["inchikey"])
-            if rec.get("ms_match") is False:
+            if rec.get("ms_match") is False and not rec.get("ms_explained"):
                 probs.append("MS in patent does not match MW")
             if rec["status"] != "trusted":
                 probs.append("needs your review: " + "; ".join(rec["flags"]))
@@ -406,6 +548,17 @@ def outputs(a):
     for cmd in cmds:
         r = subprocess.run(cmd, capture_output=True, text=True)
         print(os.path.basename(cmd[1]), "ok" if r.returncode == 0 else "FAILED\n" + r.stderr[-1500:])
+    if a.export:
+        # One clean folder with everything the user needs; working files stay in RUN.
+        dest = os.path.expanduser(a.export)
+        os.makedirs(dest, exist_ok=True)
+        for f in glob.glob(os.path.join(a.run, "out", "*")):
+            shutil.copy2(f, dest)
+        shutil.copytree(os.path.join(a.run, "cdx"), os.path.join(dest, "ChemDraw files"), dirs_exist_ok=True)
+        for f in ["validation/report.md", "tracker.csv", "decisions.md", "mistakes.md"]:
+            if os.path.exists(os.path.join(a.run, f)):
+                shutil.copy2(os.path.join(a.run, f), dest)
+        print("exported to", dest)
 
 def sync(run):
     """Copy record fields into tracker.csv so it is the one readable state file."""
@@ -430,8 +583,13 @@ if __name__ == "__main__":
     s = sub.add_parser("init"); s.add_argument("run"); s.add_argument("--pdf", required=True)
     s.add_argument("--patent-id", required=True); s.add_argument("--prefix", default="")
     s.add_argument("--target", default="")
-    for name in ["tables", "apply", "validate", "outputs", "status", "dcapply"]:
+    for name in ["tables", "apply", "validate", "status", "dcapply"]:
         sub.add_parser(name).add_argument("run")
+    s = sub.add_parser("outputs"); s.add_argument("run"); s.add_argument("--export")
+    s = sub.add_parser("fixbatch"); s.add_argument("run"); s.add_argument("--batch", type=int, default=20)
+    sub.add_parser("fixapply").add_argument("run")
+    s = sub.add_parser("clogp"); s.add_argument("run"); s.add_argument("--only")
+    sub.add_parser("chemdraw_check")
     for name in ["crops", "ocr"]:
         s = sub.add_parser(name); s.add_argument("run"); s.add_argument("--pages", required=True)
     s = sub.add_parser("resolve"); s.add_argument("run")

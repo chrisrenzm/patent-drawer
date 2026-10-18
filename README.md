@@ -31,13 +31,13 @@ First run: `bash skills/patent-drawer/scripts/setup_env.sh` (Python 3.10+). It n
 
 ## Use
 
-Ask Claude, for example: *"Draw the A-rated compounds from WO2020243027, PDF attached."* The skill stops for your confirmation at four points: which compounds, what goes on each card, one pilot card, and the final hand-back.
+Ask Claude, for example: *"Draw the A-rated compounds from WO2020243027, PDF attached."* The run is hands-off: the skill asks no questions, writes every choice it makes to `decisions.md`, investigates and fixes flagged compounds (logged in `mistakes.md`), and puts everything in one folder in your Downloads.
 
 ## Limitations
 
 - Patents with structure tables laid out differently from a `label | drawing` grid need the agent to locate drawings page by page.
 - Compounds with no name in the text get their name written from the drawing, and they are always flagged.
-- **CLogP:** ChemDraw's CLogP is proprietary. Cards leave it blank for you to fill in ChemDraw.
+- **CLogP (macOS only):** CLogP comes from your own ChemDraw, which must be **ChemDraw Professional or Signals ChemDraw** (ChemDraw Prime has no CLogP). The skill checks this at the start of every run. ChemDraw opens, refreshes and saves temporary files; there is no clicking. On Windows this is not set up or tested yet, so cards leave CLogP blank there. Free tools (RDKit, CDK) are not used as a stand-in: on test compounds they read 1.6–2.9 units higher than ChemDraw.
 - You need your own ChemDraw licence to edit the cards. This project is not affiliated with Revvity or ChemDraw.
 - Output structures must be reviewed by a chemist.
 
