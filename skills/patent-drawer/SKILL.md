@@ -64,7 +64,7 @@ If it fails, leave CLogP blank, say why in `decisions.md`, and continue. Re-run 
 `PD draw RUN --only <one compound, ideally with stereo>`. Look at its review image yourself. If something is wrong, fix the spec and redo; otherwise continue.
 
 ## Phase 5: Draw, double-check, validate, assemble
-1. `PD draw RUN`.
+1. `PD draw RUN`. Compounds sharing a core are drawn with that core in the same place and orientation, so cards can be compared by eye (one series per shared core; the cores are saved in `RUN/cores.json` and reused by `--only`).
 2. **Double-check** (separate agent groups that did not do the structure check): `PD doublecheck RUN` (default: every compound if fewer than 100 are selected, else flagged + a random 20 % of trusted; if the user chose a full check for 100 or more, add `--sample 1`).
    - Stage A, code, all cards: the card's formula and [M+H]⁺ against the patent's own "calcd. for" formula and MS. Mismatches → `batches/mw_K.json`. Run the **MW group** (prompt `reference/mw_prompt.md`).
    - Stage B: every compound (under 100), or every flagged compound plus a random 20 % of trusted ones (100 or more) → `batches/xc_K.json`. Run the **cross-check group** (prompt `reference/crosscheck_prompt.md`).

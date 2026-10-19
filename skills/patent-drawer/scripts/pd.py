@@ -443,12 +443,28 @@ def draw(a):
     rows = {r["patent_no"]: r for r in read_tracker(a.run)}
     os.makedirs(os.path.join(a.run, "cdx"), exist_ok=True)
     nos = a.only.split(",") if a.only else [r["patent_no"] for r in selected(rows.values())]
+    # shared cores: found on a full draw, reused by --only so redrawn cards still line up
+    import align
+    cores_file = os.path.join(a.run, "cores.json")
+    if a.only and os.path.exists(cores_file):
+        cores = json.load(open(cores_file))
+    else:
+        smiles = {}
+        for r in selected(rows.values()):
+            rec = load_rec(a.run, r["patent_no"])
+            if rec and rec.get("smiles"):
+                smiles[r["patent_no"]] = rec["smiles"]
+        cores = align.find_cores(smiles)
+        json.dump(cores, open(cores_file, "w"), indent=1)
+        alone = len(smiles) - sum(len(c["members"]) for c in cores)
+        print(f"series: {[len(c['members']) for c in cores]} compounds aligned on a shared core, {alone} drawn on their own")
     for no in nos:
         rec = load_rec(a.run, no)
         if not rec or not rec.get("smiles"):
             print(no, "skipped: no structure"); continue
         out = os.path.join(a.run, "cdx", rec["label"] + ".cdxml")
-        draw_card(rec["smiles"], caption_lines(spec, rows[no], rec), out)
+        draw_card(rec["smiles"], caption_lines(spec, rows[no], rec), out,
+                  align.core_for(rec["smiles"], cores))
         rec["file"] = out
         save_rec(a.run, rec)
         print(no, "->", os.path.basename(out))

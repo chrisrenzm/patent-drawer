@@ -146,18 +146,26 @@ def _min_dist(pts):
                default=99.0)
 
 
-def _layout(mol):
+def _layout(mol, core=None):
     """2D coordinates, scaled to bond length BL, y pointing down. CoordGen first;
-    if any two atoms end up too close, try RDKit's depictor with sampling."""
+    if any two atoms end up too close, try RDKit's depictor with sampling.
+    core = (pattern, coords): the matching atoms are held at those coordinates
+    (same units as the result), so a series shares one orientation."""
+    fixed = {}
+    if core:
+        from rdkit.Geometry import Point2D
+        match = mol.GetSubstructMatch(core[0])
+        fixed = {i: Point2D(x / BL * 1.5, -y / BL * 1.5)
+                 for i, (x, y) in zip(match, core[1])}
     tries = [dict(coordgen=True)] + [dict(coordgen=False, seed=s) for s in (1, 2, 3, 4)]
     best = None
     for t in tries:
         m = Chem.Mol(mol)
         rdDepictor.SetPreferCoordGen(t["coordgen"])
         if t["coordgen"]:
-            rdDepictor.Compute2DCoords(m)
+            rdDepictor.Compute2DCoords(m, coordMap=fixed)
         else:
-            rdDepictor.Compute2DCoords(m, forceRDKit=True, nFlipsPerSample=3,
+            rdDepictor.Compute2DCoords(m, coordMap=fixed, forceRDKit=True, nFlipsPerSample=3,
                                        nSample=50, sampleSeed=t["seed"])
         c = m.GetConformer()
         pts = [(c.GetAtomPosition(i).x, -c.GetAtomPosition(i).y)
@@ -240,14 +248,14 @@ def _num(v):
     return ("%.2f" % v).rstrip("0").rstrip(".")
 
 
-def draw_card(smiles, lines, out_path):
+def draw_card(smiles, lines, out_path, core=None):
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
         raise ValueError("bad SMILES: %s" % smiles)
     Chem.AssignStereochemistry(mol, cleanIt=True, force=True)
     cip = {a.GetIdx(): a.GetProp("_CIPCode") for a in mol.GetAtoms()
            if a.HasProp("_CIPCode")}
-    pts = _layout(mol)
+    pts = _layout(mol, core)
     # wedge/hash bonds from the stereo centres, using these coordinates
     m = Chem.Mol(mol)
     conf = Chem.Conformer(m.GetNumAtoms())
