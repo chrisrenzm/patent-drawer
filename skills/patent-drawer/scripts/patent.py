@@ -47,6 +47,16 @@ def _label_pattern(raw, prefix):
     s = s.translate(str.maketrans("lIiOo", "11100"))
     return prefix + s.replace("S", "[35]")
 
+_ION = r"(?:[\[(]\s*M\s*\+\s*(?:H|1)\s*\+?\s*[\])]\s*\+?|MH\s*\+)"  # [M+H]+ [M+1]+ (M+H)+ MH+ (not Na, not M-H)
+_NUM = r"(\d{3,4}(?:\.\d{1,4})?)"
+_MS = re.compile(_ION + r"[^\n]{0,60}?found\s*[:=]?\s*" + _NUM          # [M+H]+ calcd 481.1, found 481.0
+                 + "|" + _ION + r"\s*[:=]?\s*" + _NUM                      # [M+H]+ 481.1
+                 + "|" + _NUM + r"\s*\(?\s*" + _ION + r"(?![^\n]{0,30}found)", re.I)  # m/z 494 [M+1]+
+
+def ms_values(text):
+    """[M+H]+ values in text; when calcd and found are both given, only found."""
+    return [next(g for g in m.groups() if g) for m in _MS.finditer(text)]
+
 @lru_cache(None)
 def example_titles(pdf, prefix):
     """Every compound named in an 'Example N. [Synthesis of] <name> (<label>)' title."""
@@ -57,7 +67,7 @@ def example_titles(pdf, prefix):
         head = block[:700]
         labs = list(re.finditer(r"\(\s*(" + re.escape(prefix) + r"[\sA-Za-z0-9]{1,5}?)\s*\)", head))
         page = t[:h.start()].count("<<PAGE ")
-        ms = re.findall(r"\[M\s*\+\s*H\]\s*\+?\s*:?\s*\d{3}(?:\.\d)?\s*,?\s*found\s*:?\s*(\d{3}(?:\.\d)?)", block)
+        ms = ms_values(block)
         formulas = re.findall(r"calcd\.?\s*(?:for|For)?\s*:?\s*([A-Z][A-Za-z0-9]{4,30})", block)
         start = 0
         for lab in labs:

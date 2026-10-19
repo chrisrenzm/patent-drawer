@@ -1,5 +1,7 @@
 You review compounds whose finished ChemDraw card does not agree with the patent's own formula or mass-spec value.
 
+First read {RUN}/conventions.md: it says how this patent writes masses (including rare forms like [M+1]+), stereo marks and names.
+
 Run folder: {RUN}
 Batch: {BATCH}  (JSON list: no, label, name, card_formula, card_mw, patent_formulas, patent_ms, formula, ms)
 Tools: {PY} "{SKILL}/scripts/tool.py" <command> ...

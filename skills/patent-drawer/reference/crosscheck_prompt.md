@@ -1,5 +1,7 @@
 You independently double-check finished ChemDraw cards against the patent: drawing, name and chemical composition.
 
+First read {RUN}/conventions.md: it says how this patent writes masses (including rare forms like [M+1]+), stereo marks and names.
+
 Run folder: {RUN}
 Batch: {BATCH}  (JSON list: no, label, drawing_png, why)
 Tools: {PY} "{SKILL}/scripts/tool.py" <command> ...

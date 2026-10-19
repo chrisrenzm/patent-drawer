@@ -2,6 +2,7 @@
 
   pd.py init     RUN --pdf P --patent-id WO-2020243027-A1 --prefix A --target CYP46A1
   pd.py tables   RUN                     pages that mention "Table N" (to find the data tables)
+  pd.py conventions RUN [--text F]       how this patent writes masses/stereo/headings -> RUN/conventions.md
   pd.py crops    RUN --pages 14-39       cut the structure table into crops/<no>.png
   (agent writes RUN/tracker.csv and RUN/spec.json, user confirms)  -> GATE 1, GATE 2
   pd.py resolve  RUN [--mode thorough|lean] [--batch 20]
@@ -9,7 +10,8 @@
   (checker subagents write RUN/batches/batch_K.result.json)
   pd.py apply    RUN                     read checker results (corrected names go through OPSIN again)
   pd.py draw     RUN [--only A6]         write cdx/<label>.cdxml for every resolved compound
-  pd.py doublecheck RUN [--sample 0.2]  card formula/MW vs patent (all); batches for the MW and cross-check agent groups
+  pd.py doublecheck RUN [--sample F]    card formula/MW vs patent (all); batches for the MW and cross-check agent groups
+                                         (cross-check: all compounds if <100, else flagged + 20% of trusted)
   (MW agents write batches/mw_K.result.json; cross-check agents write batches/xc_K.result.json)
   pd.py dcapply  RUN                     read double-check verdicts
   pd.py validate RUN                     code checks -> validation/report.md
@@ -179,6 +181,8 @@ def resolve(a):
                 rec["flags"].append("not in database list")
             if rec["ms_match"] is False:
                 rec["flags"].append("MS does not match")
+            if not rec["ms_found"]:
+                rec["flags"].append("no patent mass found")
         else:
             rec["structure_source"] = None
             rec["flags"].append("no name found" if not e else "name did not convert")
@@ -215,8 +219,15 @@ def apply(a):
                 print("unknown compound in", f, v.get("no")); continue
             rec["checker"] = v
             verdict = v.get("verdict")
+            if v.get("patent_mass"):  # checker found the mass on the page
+                rec["ms_found"] = [float(v["patent_mass"])]
+                rec["flags"] = [x for x in rec["flags"] if x != "no patent mass found"]
+                if rec.get("mh"):
+                    rec["ms_match"] = abs(rec["ms_found"][0] - rec["mh"]) < 0.6
+                    if rec["ms_match"] is False and "MS does not match" not in rec["flags"]:
+                        rec["flags"].append("MS does not match")
             if verdict == "match":
-                rec["status"] = "trusted"
+                rec["status"] = "trusted" if rec["ms_found"] else "flagged"  # no mass -> fix loop
             elif verdict == "fixed" and v.get("corrected_name"):
                 s = P.opsin(v["corrected_name"])
                 info = P.mol_info(s) if s else None
@@ -265,8 +276,13 @@ def fixapply(a):
             if not rec:
                 print("unknown compound in", f, v.get("no")); continue
             verdict, done = v.get("verdict"), v.get("reason", "")
+            if v.get("patent_mass"):  # fixer found the mass on the page
+                rec["ms_found"] = [float(v["patent_mass"])]
+                rec["flags"] = [x for x in rec["flags"] if x != "no patent mass found"]
+                if rec.get("mh"):
+                    rec["ms_match"] = abs(rec["ms_found"][0] - rec["mh"]) < 0.6
             if verdict == "false_alarm":
-                rec["status"] = "trusted"
+                rec["status"] = "trusted" if rec["ms_found"] else "flagged"  # no mass at all -> user decides
                 if rec.get("ms_match") is False:
                     rec["ms_explained"] = done
             elif verdict == "fixed" and v.get("corrected_name"):
@@ -276,7 +292,7 @@ def fixapply(a):
                     rec.update(info, name=v["corrected_name"],
                                structure_source=f"fixed from drawing -> OPSIN ({done})")
                     rec["ms_match"] = any(abs(x - info["mh"]) < 0.6 for x in rec["ms_found"]) if rec["ms_found"] else None
-                    rec["status"] = "fixed" if rec["ms_match"] is not False else "flagged"
+                    rec["status"] = "fixed" if rec["ms_found"] and rec["ms_match"] is not False else "flagged"
                     done = f"new name: {v['corrected_name']}" + ("" if rec["ms_match"] is not False else " (mass still off)")
                 else:
                     rec["status"], done = "flagged", "corrected name did not convert: " + v["corrected_name"]
@@ -450,7 +466,8 @@ def card_info(run, no):
 def doublecheck(a):
     """Stage A (code, all): card formula/MW vs the patent's own formula and MS.
     Mismatches -> batches/mw_K.json for the MW agent group.
-    Stage B: all flagged + a random sample of trusted -> batches/xc_K.json for the cross-check group."""
+    Stage B: all flagged + trusted (every one if <100 compounds, else a 20% sample; --sample overrides)
+    -> batches/xc_K.json for the cross-check group."""
     import math, random
     c, pdf = cfg(a.run), pdf_path(a.run)
     bdir = os.path.join(a.run, "batches")
@@ -478,10 +495,19 @@ def doublecheck(a):
         if chk["formula"] not in ("ok", "no formula in patent") or chk["ms"] == "mismatch":
             mw_todo.append(dict(no=no, label=rec["label"], name=rec.get("name"), **chk))
         (trusted if rec["status"] == "trusted" else flagged).append(no)
-    k = math.ceil(a.sample * len(trusted))
+    total = len(trusted) + len(flagged)
+    if a.sample is not None:
+        frac, rule = a.sample, f"--sample {a.sample} given"
+    elif total < 100:
+        frac, rule = 1.0, f"{total} compounds (<100): checking every compound"
+    else:
+        frac, rule = 0.2, f"{total} compounds (>=100): checking all flagged + 20% of trusted"
+    print("cross-check rule:", rule)
+    k = min(len(trusted), math.ceil(frac * len(trusted)))
     sample = sorted(random.Random(a.seed).sample(trusted, k), key=trusted.index)
+    why = "trusted (all checked)" if k == len(trusted) else "random sample"
     xc = [dict(no=no, label=load_rec(a.run, no)["label"], drawing_png=os.path.join(a.run, "crops", no + ".png"),
-               why="flagged" if no in flagged else "random sample") for no in flagged + sample]
+               why="flagged" if no in flagged else why) for no in flagged + sample]
     for name, items in (("mw", mw_todo), ("xc", xc)):
         for i in range(0, len(items), a.batch):
             json.dump(items[i:i + a.batch], open(os.path.join(bdir, f"{name}_{i // a.batch + 1}.json"), "w"), indent=1)
@@ -617,6 +643,74 @@ def status(a):
     recs = [load_rec(a.run, r["patent_no"]) for r in selected(read_tracker(a.run))]
     print(dict(Counter((r or {}).get("status", "not resolved") for r in recs)))
 
+def conventions(a):
+    """Code survey of how this patent writes masses, stereo, example titles and labels -> RUN/conventions.md."""
+    from collections import Counter, defaultdict
+    t = open(a.text, encoding="utf-8", errors="ignore").read() if a.text else P.patent_text(pdf_path(a.run))
+    if len(t.strip()) < 2000:
+        print("warning: almost no text; for a scanned PDF pass --text with text from elsewhere")
+    heads = [(m.start(), int(m.group(1))) for m in
+             re.finditer(r"(?:(?:Synthes[ie]s|Preparation) of )?Example (\d+)\s*[:.](?!\d)", t)]
+    def example_at(pos):
+        prev = [n for p, n in heads if p <= pos]
+        return prev[-1] if prev else None
+    def snip(m):
+        return re.sub(r"\s+", " ", t[max(0, m.start() - 50): m.end() + 15]).strip()
+    mass_re = (r"[\[(]\s*M\s*[+-]\s*\d*\s*[A-Za-z]{0,4}[0-9a-z]*\s*[\])]\s*\d?\s*[+-]?"
+               r"|\bMH\s?[+-]|\b(?<![\[(])M\s?\+\s?H\b(?![\])])")
+    mass, mass_ex, mass_where = Counter(), {}, defaultdict(set)
+    for m in re.finditer(mass_re, t):
+        k = re.sub(r"\s+", "", m.group(0))
+        mass[k] += 1
+        mass_ex.setdefault(k, snip(m))
+        if example_at(m.start()) is not None:
+            mass_where[k].add(example_at(m.start()))
+    total = sum(mass.values()) or 1
+    L = ["# Conventions (code survey)", "", f"Text: {a.text or 'patent.pdf'}", "",
+         f"## Mass formats ({sum(mass.values())} mentions)"]
+    for k, n in mass.most_common():
+        L.append(f"- `{k}` {n}: \"{mass_ex[k]}\"")
+    for word, rx in [("calcd ... found", r"calc(?:d|ulated)\.?[^\n]{0,80}?found"), ("m/z", r"m/z"),
+                     ("ESI", r"\bESI\b"), ("LCMS", r"\bLC-?MS\b")]:
+        n = len(re.findall(rx, t, re.I))
+        if n:
+            L.append(f"- {word}: {n}")
+    rare = [(k, n) for k, n in mass.most_common() if n / total < 0.05]
+    if rare:
+        L += ["", "Rare (<5% of mass mentions) — check these examples:"]
+        for k, n in rare:
+            ex = sorted(mass_where[k])
+            L.append(f"- `{k}` {n}: " + (", ".join(f"Example {e}" for e in ex) if ex else "no example heading found"))
+    L += ["", "## Stereo notations"]
+    stereo = [("or1/or2", r"\bor\d\b"), ("&1/&2", r"&\d\b"), ("abs", r"\babs\b"), ("rel-", r"\brel-"),
+              ("rac-", r"\brac-"), ("R*/S*", r"\b[RS]\*"), ("(R)/(S)", r"\([RS]\)"),
+              ("(2R,3S)-style", r"\(\d+[a-z]?[RS](?:,\s*\d+[a-z]?[RS])*\)"), ("(±)", r"\(±\)|\(\+/-\)"),
+              ("cis/trans", r"\b(?:cis|trans)\b"), ("racemic", r"\bracem"),
+              ("peak 1/2, eluting", r"\bpeak \d|\b(?:first|second|fast|slow)(?:er)?[- ]eluting"),
+              ("enantiomer/diastereomer", r"\b(?:enantiomer|diastereomer)")]
+    for word, rx in stereo:
+        n = len(re.findall(rx, t, re.I if word in ("cis/trans", "racemic") else 0))
+        if n:
+            L.append(f"- {word}: {n}")
+    L += ["", "## Example headings"]
+    for word, rx in [("Example N:", r"(?<!of )Example \d+\s*:"), ("Example N.", r"(?<!of )Example \d+\.(?!\d)"),
+                     ("Synthesis of Example N", r"Synthes[ie]s of Example \d+"),
+                     ("Preparation of Example N", r"Preparation of Example \d+")]:
+        n = len(re.findall(rx, t))
+        if n:
+            L.append(f"- \"{word}\" {n}")
+    nums = sorted({n for _, n in heads})
+    if nums:
+        L.append(f"- {len(nums)} numbered examples found, {nums[0]}–{nums[-1]}")
+    labs = Counter(m.group(1) for m in re.finditer(r"\(([A-Z]{1,3}-?)\d{1,4}[a-z]?\)", t))
+    words = Counter(m.group(0).split()[0].capitalize() for m in
+                    re.finditer(r"\b(?:Compound|Cpd|Intermediate)\s+[A-Z]{0,3}-?\d+", t, re.I))
+    L += ["", "## Label prefixes", f"- config prefix: \"{cfg(a.run).get('prefix', '')}\""]
+    L += [f"- `({k}N)` {n}" for k, n in labs.most_common(5) if n >= 3]
+    L += [f"- `{k} N` {n}" for k, n in words.most_common(3)]
+    open(os.path.join(a.run, "conventions.md"), "w", encoding="utf-8").write("\n".join(L) + "\n")
+    print("\n".join(L))
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -630,12 +724,13 @@ if __name__ == "__main__":
     sub.add_parser("fixapply").add_argument("run")
     s = sub.add_parser("clogp"); s.add_argument("run"); s.add_argument("--only")
     sub.add_parser("chemdraw_check")
+    s = sub.add_parser("conventions"); s.add_argument("run"); s.add_argument("--text")
     for name in ["crops", "ocr"]:
         s = sub.add_parser(name); s.add_argument("run"); s.add_argument("--pages", required=True)
     s = sub.add_parser("resolve"); s.add_argument("run")
     s.add_argument("--mode", default="thorough", choices=["thorough", "lean"]); s.add_argument("--batch", type=int, default=20)
     s = sub.add_parser("draw"); s.add_argument("run"); s.add_argument("--only")
-    s = sub.add_parser("doublecheck"); s.add_argument("run"); s.add_argument("--sample", type=float, default=0.2)
+    s = sub.add_parser("doublecheck"); s.add_argument("run"); s.add_argument("--sample", type=float, default=None)
     s.add_argument("--seed", type=int, default=0); s.add_argument("--batch", type=int, default=20)
     a = ap.parse_args()
     globals()[a.cmd](a)
