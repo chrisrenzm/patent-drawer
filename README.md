@@ -42,6 +42,15 @@ Tested on WO 2020/243027 (CYP46A1): the selection matched the chemist's list exa
 
 First run: `bash skills/patent-drawer/scripts/setup_env.sh` (Python 3.10+). It needs network access to `www.ebi.ac.uk` (OPSIN) and `pubchem.ncbi.nlm.nih.gov`.
 
+### Requirements
+
+- **Run it locally** in Claude Code (terminal or desktop app). CLogP comes from your own ChemDraw, which a cloud session or claude.ai cannot reach; there, everything else works and CLogP is left blank.
+- **ChemDraw Professional or Signals ChemDraw** for CLogP (Prime has none).
+- **Permissions:** ChemDraw is driven by AppleScript on Mac (PowerShell on Windows), so those commands run outside Claude Code's sandbox and you approve them. The first time, macOS asks to let Terminal/Claude control ChemDraw: click **Allow**. No screen-control or Accessibility permission is needed.
+- Files are written to `./patent-drawer-runs/` and `~/Downloads/<deck name>/`.
+
+The skill repeats these in one short message at the start of every run. Full list: [`reference/requirements.md`](skills/patent-drawer/reference/requirements.md).
+
 ## Use
 
 Ask Claude, for example: *"Draw the A-rated compounds from WO2020243027, PDF attached."* The skill asks you once to confirm the compound list and card labels, then runs hands-off: it writes every choice it makes to `decisions.md`, investigates and fixes flagged compounds (logged in `mistakes.md`), and puts everything in one folder in your Downloads.
