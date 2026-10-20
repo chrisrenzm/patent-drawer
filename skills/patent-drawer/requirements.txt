@@ -4,6 +4,5 @@ requests>=2.31
 numpy>=1.26
 pillow>=10.0
 olefile>=0.47
-cairosvg>=2.7
 openpyxl>=3.1
 rapidocr_onnxruntime>=1.3

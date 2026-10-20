@@ -1,6 +1,6 @@
 {
   "name": "patent-drawer",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Turn compounds in a chemistry patent into ChemDraw cards, an editable PowerPoint deck, an Excel tracker and a validation report.",
   "license": "MIT"
 }

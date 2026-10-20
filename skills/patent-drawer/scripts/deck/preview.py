@@ -1,4 +1,5 @@
-import io, cairosvg
+import io
+import pymupdf
 from rdkit import Chem, RDLogger
 from rdkit.Chem.Draw import rdMolDraw2D
 from PIL import Image, ImageDraw, ImageFont
@@ -51,7 +52,9 @@ def mol_png(m, data=None):
     d.drawOptions().clearBackground = True
     d.DrawMolecule(m)
     d.FinishDrawing()
-    png = cairosvg.svg2png(bytestring=d.GetDrawingText().encode(), scale=S)
+    # PyMuPDF turns the SVG into a picture; no Cairo/GTK install needed (Windows)
+    svg = pymupdf.open(stream=d.GetDrawingText().encode(), filetype='svg')
+    png = svg[0].get_pixmap(matrix=pymupdf.Matrix(S, S), alpha=True).tobytes('png')
     return Image.open(io.BytesIO(png)).convert('RGBA')
 
 def render(data: bytes) -> Image.Image:

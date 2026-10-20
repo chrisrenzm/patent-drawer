@@ -335,39 +335,71 @@ foreach ($p in $args) {
 }
 """
 
-def _run_chemdraw(files):
-    """Have ChemDraw open, clean and save each file. Returns an error message, or '' if it ran."""
-    files = [os.path.abspath(f) for f in files]  # ChemDraw cannot open relative paths
+CHUNK = 10          # compounds per ChemDraw call
+CHUNK_TIMEOUT = 90  # seconds per call; normal is under 1 s per compound
+
+def _osa(script):
+    return subprocess.run(["osascript", "-e", script], capture_output=True, text=True).stdout.strip()
+
+def _mac_start():
+    """Start ChemDraw hidden in the background. Returns True if we started it."""
+    if _osa('application "ChemDraw" is running') == "true":
+        return False
+    subprocess.run(["open", "-g", "-j", "-a", "ChemDraw"])
+    for _ in range(60):
+        if _osa('application "ChemDraw" is running') == "true":
+            break
+        time.sleep(0.5)
+    time.sleep(2)
+    return True
+
+def _chemdraw_call(files):
+    """One ChemDraw call on a few files. Returns (error message or '', timed_out)."""
     if sys.platform == "darwin":
-        # Start ChemDraw hidden and in the background so it never takes over the screen,
-        # and quit it afterwards if it was not already open.
-        osa = lambda s: subprocess.run(["osascript", "-e", s], capture_output=True, text=True).stdout.strip()
-        started = osa('application "ChemDraw" is running') != "true"
-        if started:
-            subprocess.run(["open", "-g", "-j", "-a", "ChemDraw"])
-            for _ in range(60):
-                if osa('application "ChemDraw" is running') == "true":
-                    break
-                time.sleep(0.5)
-            time.sleep(2)
-        try:
-            r = subprocess.run(["osascript", "-"] + files, input=CLOGP_SCRIPT, capture_output=True, text=True)
-        finally:
-            if started:
-                osa('tell application "ChemDraw" to quit saving no')
-        return r.stderr.strip()[-300:] if r.returncode else ""
-    elif sys.platform == "win32":
+        cmd, script = ["osascript", "-"] + files, CLOGP_SCRIPT
+    else:
         import tempfile
         ps1 = os.path.join(tempfile.mkdtemp(), "clogp.ps1")
         open(ps1, "w").write(CLOGP_SCRIPT_WIN)
         cmd, script = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1] + files, None
-    else:
-        return "ChemDraw is not available on this system"
     try:
-        r = subprocess.run(cmd, input=script, capture_output=True, text=True)
+        r = subprocess.run(cmd, input=script, capture_output=True, text=True, timeout=CHUNK_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return "ChemDraw did not answer (a pop-up may be waiting for a click)", True
     except FileNotFoundError as e:
-        return str(e)
-    return r.stderr.strip()[-300:] if r.returncode else ""
+        return str(e), False
+    return (r.stderr.strip()[-300:] if r.returncode else ""), False
+
+def _run_chemdraw(files):
+    """Have ChemDraw open, clean and save each file, 10 at a time, each call with a time limit.
+    A stuck call is retried once (on Mac after restarting the ChemDraw we started); after two
+    stuck calls the rest is skipped, so the run always finishes. Returns error messages, or ''."""
+    if sys.platform not in ("darwin", "win32"):
+        return "ChemDraw is not available on this system"
+    files = [os.path.abspath(f) for f in files]  # ChemDraw cannot open relative paths
+    started = _mac_start() if sys.platform == "darwin" else False
+    errors, stuck = [], 0
+    try:
+        for i in range(0, len(files), CHUNK):
+            chunk = files[i:i + CHUNK]
+            err, timed_out = _chemdraw_call(chunk)
+            if timed_out:
+                if started:  # only ever restart a ChemDraw we opened ourselves
+                    subprocess.run(["pkill", "-x", "ChemDraw"])
+                    time.sleep(2)
+                    _mac_start()
+                err, timed_out = _chemdraw_call(chunk)
+            if err:
+                errors.append(err)
+            if timed_out:
+                stuck += 1
+                if stuck >= 2:
+                    errors.append(f"ChemDraw stuck twice; skipped the last {len(files) - i - len(chunk)} compounds")
+                    break
+    finally:
+        if started:
+            _osa('tell application "ChemDraw" to quit saving no')
+    return "; ".join(dict.fromkeys(errors))
 
 def _add_clogp_link(path):
     s = open(path).read()
@@ -392,6 +424,7 @@ def chemdraw_check(a):
     err = _run_chemdraw([f])
     m = re.search(r"CLogP:\s*(-?[\d.]+)", open(f).read())
     print(f"CHEMDRAW: ok, CLogP works (caffeine {m.group(1)})" if m else
+          f"CHEMDRAW: stuck: a ChemDraw pop-up (licence, update, or macOS 'allow control') may be waiting for a click; ask the user to click it, then re-run this check" if "did not answer" in err else
           f"CHEMDRAW: no CLogP came back (is ChemDraw Professional or Signals ChemDraw installed?) {err}")
 
 def clogp(a):

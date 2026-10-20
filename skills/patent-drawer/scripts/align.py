@@ -59,6 +59,8 @@ def find_cores(smiles):
             break
         p = Chem.MolFromSmarts(sm)
         members = [no for no, m in left.items() if m.HasSubstructMatch(p)]
+        if not members:
+            break                            # never loop forever on a core nothing matches
         # the core is placed as it sits in the smallest member's normal drawing
         ref = min(members, key=lambda no: (left[no].GetNumAtoms(), no))
         pts = _layout(left[ref])
